@@ -102,5 +102,5 @@ Iterative sessions on a physical Samsung phone surfaced issues including sender-
 ## Submission links
 
 - Demo video: `ADD_URL`
-- Public repository: `ADD_URL`
+- Public repository: https://github.com/psh0825-max/ReplyHub
 - Codex feedback/session reference: `ADD_REFERENCE`

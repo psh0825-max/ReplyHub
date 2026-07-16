@@ -51,7 +51,7 @@
 - [x] `USABILITY_NOTES.md`
 - [x] Environment-based release signing configuration
 - [x] Debug APK artifact
-- [ ] Public repository URL
+- [x] Public repository URL: https://github.com/psh0825-max/ReplyHub
 - [ ] Demo video URL
 - [ ] Devpost project images
 - [ ] Codex `/feedback` session reference
