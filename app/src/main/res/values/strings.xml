@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ReplyHub</string>
+    <string name="notification_listener_label">ReplyHub 알림 수집</string>
+</resources>
+
