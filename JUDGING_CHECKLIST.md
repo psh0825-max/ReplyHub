@@ -54,5 +54,5 @@
 - [x] Public repository URL: https://github.com/psh0825-max/ReplyHub
 - [ ] Demo video URL
 - [ ] Devpost project images
-- [ ] Codex `/feedback` session reference
-- [ ] Replace every `ADD_URL` and `ADD_REFERENCE` placeholder before submission
+- [x] Codex task reference: `019f688b-b60c-75e0-bfa6-4e5363875b30`
+- [ ] Replace the remaining demo-video `ADD_URL` placeholder before submission
