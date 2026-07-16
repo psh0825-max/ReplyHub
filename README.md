@@ -1,5 +1,7 @@
 # ReplyHub
 
+[![Android CI](https://github.com/psh0825-max/ReplyHub/actions/workflows/android.yml/badge.svg)](https://github.com/psh0825-max/ReplyHub/actions/workflows/android.yml)
+
 ReplyHub is an Android notification triage hub for major consumer and workplace messengers. It captures message notifications by conversation, presents original and translated text in one inbox, drafts context-aware replies, accepts voice input, and sends through Android RemoteInput when available. Unsupported delivery paths fall back to sensitive clipboard copy, app launch, and explicit sent-history confirmation.
 
 ## Current hackathon build

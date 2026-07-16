@@ -12,6 +12,7 @@
 - [x] Korean voice input
 - [x] Encrypted BYOK configuration
 - [x] Unit tests, lint, clean APK build
+- [x] Public GitHub Actions test, lint, and APK build workflow
 - [ ] Record one uninterrupted real-notification-to-send take
 
 ## Design
