@@ -2,6 +2,8 @@
 
 [![Android CI](https://github.com/psh0825-max/ReplyHub/actions/workflows/android.yml/badge.svg)](https://github.com/psh0825-max/ReplyHub/actions/workflows/android.yml)
 
+[Download the hackathon demo APK](https://github.com/psh0825-max/ReplyHub/releases/tag/v0.1.0-hackathon). The downloadable build uses the Android debug certificate and is for judging and device testing only.
+
 ReplyHub is an Android notification triage hub for major consumer and workplace messengers. It captures message notifications by conversation, presents original and translated text in one inbox, drafts context-aware replies, accepts voice input, and sends through Android RemoteInput when available. Unsupported delivery paths fall back to sensitive clipboard copy, app launch, and explicit sent-history confirmation.
 
 ## Current hackathon build

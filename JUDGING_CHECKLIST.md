@@ -51,7 +51,7 @@
 - [x] `PRIVACY.md`
 - [x] `USABILITY_NOTES.md`
 - [x] Environment-based release signing configuration
-- [x] Debug APK artifact
+- [x] Public demo APK artifact: https://github.com/psh0825-max/ReplyHub/releases/tag/v0.1.0-hackathon
 - [x] Public repository URL: https://github.com/psh0825-max/ReplyHub
 - [ ] Demo video URL
 - [ ] Devpost project images
