@@ -101,7 +101,7 @@ Iterative sessions on a physical Samsung phone surfaced issues including sender-
 
 ## Submission links
 
-- Demo video: `ADD_URL`
+- Demo video: https://youtu.be/U7yuFZ2btmw
 - Public repository: https://github.com/psh0825-max/ReplyHub
 - Demo APK: https://github.com/psh0825-max/ReplyHub/releases/tag/v0.1.0-hackathon
 - Codex task reference: `019f688b-b60c-75e0-bfa6-4e5363875b30`
