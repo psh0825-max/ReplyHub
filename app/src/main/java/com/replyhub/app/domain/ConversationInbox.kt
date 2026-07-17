@@ -30,7 +30,7 @@ data class ConversationSummary(
     val messageCount: Int = messages.size
     val urgentCount: Int = messages.count { it.priority == "URGENT" }
     val supportsQuickReply: Boolean = messages.any { it.hasRemoteInputAction }
-    val needsReply: Boolean = !latestMessage.isOutgoing
+    val needsReply: Boolean = !latestMessage.isOutgoing && !latestMessage.isHandled
     val isUrgent: Boolean = needsReply && latestMessage.priority == "URGENT"
     val hasForeignLanguage: Boolean = messages.any { message ->
         !message.isOutgoing && message.detectedLanguage.isForeignLanguage()

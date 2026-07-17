@@ -33,6 +33,9 @@ class ReplyHubNotificationListener : NotificationListenerService() {
         connectedInstance = this
         refreshActiveReplyTargets()
         captureActiveNotifications()
+        serviceScope.launch {
+            replyHubApplication.messageRetentionManager.pruneIfDue()
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -96,7 +99,7 @@ class ReplyHubNotificationListener : NotificationListenerService() {
             "notification package=${sbn.packageName}, actions=${notification.actions.orEmpty().size}, " +
                 "bodyCharacters=${body.length}, textCharacters=${text.length}, " +
                 "bigTextCharacters=${bigText.length}, messagingStyle=${messagingMessage != null}, " +
-                "hasSubText=${subText.isNotBlank()}",
+                "hasSubText=${subText.isNotBlank()}, hasRemoteInput=$hasRemoteInput",
         )
 
         val repository = replyHubApplication.repository

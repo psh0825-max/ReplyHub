@@ -68,3 +68,7 @@ Messenger notification
 
 Submission-ready copy, the recording runbook, privacy explanation, and device-test notes are in [SUBMISSION.md](./SUBMISSION.md), [DEMO_SCRIPT_KO.md](./DEMO_SCRIPT_KO.md), [PRIVACY.md](./PRIVACY.md), and [USABILITY_NOTES.md](./USABILITY_NOTES.md).
 Release signing uses environment variables documented in [RELEASE.md](./RELEASE.md); no signing secret is stored in the repository.
+
+## License
+
+ReplyHub is available under the [MIT License](./LICENSE).

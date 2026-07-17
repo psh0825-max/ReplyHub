@@ -1,6 +1,7 @@
 package com.replyhub.app.ai
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,8 +29,28 @@ data class StructuredOutput(
     val schema: JSONObject,
 )
 
+class OpenAiIncompleteException(
+    val reason: String,
+) : IllegalStateException(
+    if (reason == MAX_OUTPUT_TOKENS_REASON) {
+        "OpenAI 응답이 길이 제한으로 잘렸습니다."
+    } else {
+        "OpenAI 응답 생성이 완료되지 않았습니다." +
+            reason.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+    },
+)
+
+class OpenAiHttpException(
+    val statusCode: Int,
+    message: String,
+) : IllegalStateException(message)
+
 class OpenAiResponsesClient(
     private val safetyIdentifier: String,
+    private val retryDelay: suspend (Long) -> Unit = { millis -> delay(millis) },
+    private val connectionFactory: (URL) -> HttpURLConnection = { url ->
+        url.openConnection() as HttpURLConnection
+    },
 ) {
     suspend fun createResponse(
         apiKey: String,
@@ -41,6 +62,81 @@ class OpenAiResponsesClient(
         maxOutputTokens: Int = 700,
         reasoningEffort: String = "low",
     ): OpenAiResponse = withContext(Dispatchers.IO) {
+        var currentMaxOutputTokens = maxOutputTokens
+        var incompleteRetryCount = 0
+        var parsedResponse: OpenAiResponse? = null
+
+        while (parsedResponse == null) {
+            val request = buildRequest(
+                model = model,
+                instructions = instructions,
+                input = input,
+                webSearchMode = webSearchMode,
+                structuredOutput = structuredOutput,
+                maxOutputTokens = currentMaxOutputTokens,
+                reasoningEffort = reasoningEffort,
+            )
+            val responseBody = executeRequestWithRetry(apiKey, request)
+
+            try {
+                parsedResponse = parseResponse(JSONObject(responseBody))
+            } catch (error: OpenAiIncompleteException) {
+                if (
+                    error.reason != MAX_OUTPUT_TOKENS_REASON ||
+                    incompleteRetryCount >= MAX_INCOMPLETE_RETRIES
+                ) {
+                    throw error
+                }
+                incompleteRetryCount += 1
+                currentMaxOutputTokens = (currentMaxOutputTokens.toLong() * 2)
+                    .coerceAtMost(Int.MAX_VALUE.toLong())
+                    .toInt()
+            }
+        }
+        parsedResponse
+    }
+
+    suspend fun testConnection(apiKey: String): Result<Unit> = runCatching {
+        withContext(Dispatchers.IO) {
+            val request = buildRequest(
+                model = MODEL,
+                instructions = "Reply with exactly OK.",
+                input = "Connection test",
+                webSearchMode = WebSearchMode.DISABLED,
+                structuredOutput = null,
+                maxOutputTokens = 256,
+                reasoningEffort = "low",
+            )
+            executeRequestWithRetry(apiKey, request)
+            Unit
+        }
+    }
+
+    private suspend fun executeRequestWithRetry(apiKey: String, request: JSONObject): String {
+        var retryCount = 0
+        while (true) {
+            try {
+                return executeRequest(apiKey, request)
+            } catch (error: OpenAiHttpException) {
+                if (error.statusCode !in RETRYABLE_HTTP_STATUS_CODES || retryCount >= MAX_HTTP_RETRIES) {
+                    throw error
+                }
+                val backoffMillis = RETRY_BASE_DELAY_MILLIS * (1L shl retryCount)
+                retryCount += 1
+                retryDelay(backoffMillis)
+            }
+        }
+    }
+
+    private fun buildRequest(
+        model: String,
+        instructions: String,
+        input: String,
+        webSearchMode: WebSearchMode,
+        structuredOutput: StructuredOutput?,
+        maxOutputTokens: Int,
+        reasoningEffort: String,
+    ): JSONObject {
         val request = JSONObject()
             .put("model", model)
             .put("instructions", instructions)
@@ -77,7 +173,11 @@ class OpenAiResponsesClient(
             request.put("include", JSONArray().put("web_search_call.action.sources"))
         }
 
-        val connection = (URL(RESPONSES_URL).openConnection() as HttpURLConnection).apply {
+        return request
+    }
+
+    private fun executeRequest(apiKey: String, request: JSONObject): String {
+        val connection = connectionFactory(URL(RESPONSES_URL)).apply {
             requestMethod = "POST"
             connectTimeout = CONNECT_TIMEOUT_MILLIS
             readTimeout = READ_TIMEOUT_MILLIS
@@ -101,25 +201,22 @@ class OpenAiResponsesClient(
                 val message = runCatching {
                     JSONObject(responseBody).optJSONObject("error")?.optString("message")
                 }.getOrNull().orEmpty().ifBlank { "OpenAI API 요청에 실패했습니다. ($status)" }
-                error(message)
+                throw OpenAiHttpException(status, message)
             }
-            parseResponse(JSONObject(responseBody))
+            return responseBody
         } finally {
             connection.disconnect()
         }
     }
 
-    suspend fun testConnection(apiKey: String): Result<Unit> = runCatching {
-        val response = createResponse(
-            apiKey = apiKey,
-            instructions = "Reply with exactly OK.",
-            input = "Connection test",
-            maxOutputTokens = 16,
-        )
-        check(response.outputText.isNotBlank()) { "OpenAI API 응답이 비어 있습니다." }
-    }
-
     private fun parseResponse(json: JSONObject): OpenAiResponse {
+        if (json.optString("status") == "incomplete") {
+            val reason = json.optJSONObject("incomplete_details")
+                ?.optString("reason")
+                .orEmpty()
+            throw OpenAiIncompleteException(reason)
+        }
+
         val output = json.optJSONArray("output") ?: JSONArray()
         val textParts = mutableListOf<String>()
         val citations = linkedMapOf<String, OpenAiCitation>()
@@ -176,8 +273,14 @@ class OpenAiResponsesClient(
         private const val RESPONSES_URL = "https://api.openai.com/v1/responses"
         private const val CONNECT_TIMEOUT_MILLIS = 15_000
         private const val READ_TIMEOUT_MILLIS = 45_000
+        private const val MAX_INCOMPLETE_RETRIES = 1
+        private const val MAX_HTTP_RETRIES = 1
+        private const val RETRY_BASE_DELAY_MILLIS = 400L
+        private val RETRYABLE_HTTP_STATUS_CODES = setOf(429, 500, 502, 503)
     }
 }
 
+private const val MAX_OUTPUT_TOKENS_REASON = "max_output_tokens"
+
 private fun String.isSafeWebUrl(): Boolean =
-    startsWith("https://", ignoreCase = true) || startsWith("http://", ignoreCase = true)
+    startsWith("https://", ignoreCase = true)

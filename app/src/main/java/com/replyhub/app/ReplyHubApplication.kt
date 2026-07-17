@@ -5,6 +5,7 @@ import com.replyhub.app.ai.ApiKeyStore
 import com.replyhub.app.ai.OpenAiResponsesClient
 import com.replyhub.app.data.AppLanguageStore
 import com.replyhub.app.data.MessageRepository
+import com.replyhub.app.data.MessageRetentionManager
 import com.replyhub.app.data.ContactLinkStore
 import com.replyhub.app.data.DemoModeStore
 import com.replyhub.app.data.ReplyHubDatabase
@@ -21,6 +22,9 @@ class ReplyHubApplication : Application() {
     val demoModeStore by lazy { DemoModeStore(this) }
     val appLanguageStore by lazy { AppLanguageStore(this) }
     val privacySettingsStore by lazy { PrivacySettingsStore(this) }
+    val messageRetentionManager by lazy {
+        MessageRetentionManager(repository, privacySettingsStore)
+    }
     val apiKeyStore by lazy { ApiKeyStore(this) }
     val openAiClient by lazy { OpenAiResponsesClient(apiKeyStore.safetyIdentifier()) }
     val messageProcessor by lazy { OpenAiMessageProcessor(apiKeyStore, openAiClient) }

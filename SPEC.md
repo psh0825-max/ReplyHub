@@ -66,7 +66,7 @@
 - Android `NotificationListenerService`: 알림 텍스트 캡처 (앱 무관, OS 레벨)
 - 로컬 저장소: 캡처된 메시지 저장 + 검색 인덱스 (SQLite 등)
 - GPT-5.6 API: 번역, 우선순위 분류, 답장 초안 생성, 검색 결과 요약
-- 웹 검색 API (예: Bing/Google Search API): 사실 확인용, 브라우저 자동화 아님
+- OpenAI 내장 `web_search` 도구: 사실 확인용, 브라우저 자동화 아님
 - Android `RemoteInput`: 지원 앱 대상 알림 기반 퀵리플라이 전송
 - Android `SpeechRecognizer`: 음성 → 텍스트 입력
 - 클립보드 + 딥링크(Intent): RemoteInput 미지원 앱 폴백
@@ -126,7 +126,7 @@
 - NotificationListenerService가 각 앱의 전체 메시지 텍스트를 안정적으로 캡처하는가? (일부 앱은 민감 알림으로 내용을 축약해서 보낼 수 있음) → 엔지니어링 확인 필요, 미확보 시 해당 앱은 v1 지원 목록에서 제외
 
 **오픈 퀘스천**
-- 웹 검색 API는 어떤 걸 쓸지 (엔지니어링 결정, blocking) — 무료/저지연 옵션 우선 검토
+- OpenAI 내장 `web_search`의 데모 환경 지연과 호출 비용이 허용 범위인지 확인 필요 (non-blocking)
 - 로컬 메시지 저장이 개인정보 관점에서 문제없는지 (기기 로컬에만 저장, 외부 전송 안 함으로 스펙에 명시할 것 — 데모/README에서 프라이버시 스토리로 언급)
 - Day 1 스파이크 결과에 따라 카카오톡/위챗 외 추가 앱(P1)을 시도할지 여부는 스파이크 이후 결정 (non-blocking)
 

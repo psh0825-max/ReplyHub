@@ -7,6 +7,8 @@ import android.os.PersistableBundle
 import com.replyhub.app.data.AppLanguage
 import com.replyhub.app.data.CapturedMessage
 import com.replyhub.app.data.resolvedConversationId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class DispatchResult(
     val sentDirectly: Boolean,
@@ -18,7 +20,7 @@ class ReplyDispatcher(private val context: Context) {
         message: CapturedMessage,
         text: String,
         language: AppLanguage,
-    ): DispatchResult {
+    ): DispatchResult = withContext(Dispatchers.Default) {
         val listenerReady = ReplyHubNotificationListener.refreshReplyTargets()
         var targetAvailable = NotificationReplyStore.isAvailable(
             message.rawNotificationKey,
@@ -45,7 +47,7 @@ class ReplyDispatcher(private val context: Context) {
                 text = text,
             )
                 .onSuccess {
-                    return DispatchResult(
+                    return@withContext DispatchResult(
                         true,
                         language.text(
                             "알림의 빠른 답장으로 전송했습니다.",
@@ -67,7 +69,7 @@ class ReplyDispatcher(private val context: Context) {
             ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         if (launchIntent != null) {
             context.startActivity(launchIntent)
-            return DispatchResult(
+            return@withContext DispatchResult(
                 false,
                 language.text(
                     "이 대화에는 활성 빠른 답장이 없어 내용을 복사하고 메신저를 열었습니다.",
@@ -75,7 +77,7 @@ class ReplyDispatcher(private val context: Context) {
                 ),
             )
         }
-        return DispatchResult(
+        return@withContext DispatchResult(
             false,
             language.text(
                 "이 대화에는 활성 빠른 답장이 없어 내용을 복사했습니다.",

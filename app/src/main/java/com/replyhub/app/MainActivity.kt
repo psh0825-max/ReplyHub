@@ -6,10 +6,12 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.LruCache
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -20,6 +22,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -62,6 +65,11 @@ import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -77,6 +85,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -87,8 +98,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -96,9 +110,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
@@ -137,6 +153,9 @@ import com.replyhub.app.ui.AiSettingsState
 import com.replyhub.app.ui.ReplyHubTheme
 import com.replyhub.app.ui.ReplyHubViewModel
 import com.replyhub.app.ui.VoiceInputController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -150,7 +169,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            ReplyHubTheme {
+            ReplyHubTheme(darkTheme = isSystemInDarkTheme()) {
                 val viewModel: ReplyHubViewModel = viewModel()
                 val appLanguage by viewModel.appLanguage.collectAsStateWithLifecycle()
                 CompositionLocalProvider(LocalAppLanguage provides appLanguage) {
@@ -190,16 +209,21 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
     var showNewMessagePicker by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var contactDialogConversation by remember { mutableStateOf<ConversationSummary?>(null) }
-    var installedApps by remember { mutableStateOf(loadLaunchableApps(context)) }
+    var installedApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
+    var installedAppsRefreshVersion by remember { mutableIntStateOf(0) }
     var notificationAccess by remember {
         mutableStateOf(hasNotificationAccess(context.packageName, context))
+    }
+
+    LaunchedEffect(context, installedAppsRefreshVersion) {
+        installedApps = loadLaunchableApps(context)
     }
 
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationAccess = hasNotificationAccess(context.packageName, context)
-                installedApps = loadLaunchableApps(context)
+                installedAppsRefreshVersion += 1
                 ReplyHubNotificationListener.refreshReplyTargets()
             }
         }
@@ -248,6 +272,12 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
             onSeedDemo = viewModel::seedDemoData,
             onEnableLiveCapture = { viewModel.setDemoMode(false) },
             onNewMessage = { showNewMessagePicker = true },
+            onSetHandled = { conversation, handled ->
+                viewModel.setMessageHandled(conversation.latestMessage.id, handled)
+            },
+            onDeleteConversation = { conversation ->
+                viewModel.deleteConversation(conversation.channels)
+            },
             onOpenInstalledApp = { app ->
                 context.packageManager.getLaunchIntentForPackage(app.packageName)?.let { intent ->
                     context.startActivity(intent)
@@ -352,12 +382,18 @@ private fun ConversationInboxScreen(
     onSeedDemo: () -> Unit,
     onEnableLiveCapture: () -> Unit,
     onNewMessage: () -> Unit,
+    onSetHandled: (ConversationSummary, Boolean) -> Unit,
+    onDeleteConversation: (ConversationSummary) -> Unit,
     onOpenInstalledApp: (InstalledApp) -> Unit,
 ) {
     val language = LocalAppLanguage.current
+    val fallbackMessengerColor = MaterialTheme.colorScheme.secondary
     var filter by rememberSaveable { mutableStateOf(InboxFilter.ALL) }
     var messengerPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
+    var pendingDelete by remember { mutableStateOf<ConversationSummary?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     val smartSummary = remember(conversations, language) {
         summarizeInbox(conversations, language.storageValue)
     }
@@ -376,7 +412,8 @@ private fun ConversationInboxScreen(
                 conversation.displayName.contains(query, ignoreCase = true) ||
                 conversation.channels.any { channel ->
                     channel.sender.contains(query, ignoreCase = true) ||
-                        appMeta(channel.packageName, language).name.contains(query, ignoreCase = true)
+                        appMeta(channel.packageName, language, fallbackMessengerColor)
+                            .name.contains(query, ignoreCase = true)
                 } ||
                 conversation.messages.any { message ->
                     message.originalText.contains(query, ignoreCase = true) ||
@@ -422,8 +459,24 @@ private fun ConversationInboxScreen(
             )
             .map { it.packageName }
     }
+    val markHandled: (ConversationSummary) -> Unit = { conversation ->
+        onSetHandled(conversation, true)
+        coroutineScope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = language.text(
+                    "${conversation.displayName} 대화를 완료했습니다.",
+                    "Marked ${conversation.displayName} as handled.",
+                ),
+                actionLabel = language.text("실행 취소", "Undo"),
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                onSetHandled(conversation, false)
+            }
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -527,7 +580,7 @@ private fun ConversationInboxScreen(
                     },
                 )
                 messengerFilters.forEach { packageName ->
-                    val messenger = appMeta(packageName, language)
+                    val messenger = appMeta(packageName, language, fallbackMessengerColor)
                     val isConnected = packageName in connectedPackages
                     val canReplyDirectly = packageName in directReplyPackages
                     val isSelected = messengerPackage == packageName
@@ -633,9 +686,11 @@ private fun ConversationInboxScreen(
                             visibleConversations,
                             key = { "conversation:${it.id.packageName}:${it.id.conversationId}" },
                         ) { conversation ->
-                            ConversationRow(
+                            SwipeableConversationRow(
                                 conversation = conversation,
                                 availabilityVersion = availabilityVersion,
+                                onMarkHandled = { markHandled(conversation) },
+                                onDeleteRequest = { pendingDelete = conversation },
                                 onClick = { onOpenConversation(conversation.id) },
                             )
                             Divider(modifier = Modifier.padding(start = 82.dp))
@@ -649,9 +704,11 @@ private fun ConversationInboxScreen(
                 ) {
                     items(visibleConversations, key = { "${it.id.packageName}:${it.id.conversationId}" }) {
                         conversation ->
-                        ConversationRow(
+                        SwipeableConversationRow(
                             conversation = conversation,
                             availabilityVersion = availabilityVersion,
+                            onMarkHandled = { markHandled(conversation) },
+                            onDeleteRequest = { pendingDelete = conversation },
                             onClick = { onOpenConversation(conversation.id) },
                         )
                         Divider(modifier = Modifier.padding(start = 82.dp))
@@ -659,6 +716,38 @@ private fun ConversationInboxScreen(
                 }
             }
         }
+    }
+
+    pendingDelete?.let { conversation ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(uiText("대화를 삭제할까요?", "Delete conversation?")) },
+            text = {
+                Text(
+                    language.text(
+                        "${conversation.displayName} 대화의 메시지 ${conversation.messageCount}개와 " +
+                            "저장된 첨부파일을 이 기기에서 삭제합니다.",
+                        "Delete ${englishCount(conversation.messageCount, "message")} and saved " +
+                            "attachments for ${conversation.displayName} from this device.",
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        onDeleteConversation(conversation)
+                    },
+                ) {
+                    Text(uiText("삭제", "Delete"), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(uiText("취소", "Cancel"))
+                }
+            },
+        )
     }
 
 }
@@ -806,6 +895,7 @@ private fun ContactLinkDialog(
     onDismiss: () -> Unit,
 ) {
     val language = LocalAppLanguage.current
+    val fallbackMessengerColor = MaterialTheme.colorScheme.secondary
     var displayName by remember(current) { mutableStateOf(current.displayName) }
     var selected by remember(current) { mutableStateOf<ConversationSummary?>(null) }
     val candidates = conversations.filter { candidate ->
@@ -874,7 +964,11 @@ private fun ContactLinkDialog(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
-                                        appMeta(candidate.latestMessage.packageName, language).name,
+                                        appMeta(
+                                            candidate.latestMessage.packageName,
+                                            language,
+                                            fallbackMessengerColor,
+                                        ).name,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -917,6 +1011,7 @@ private fun ConversationPickerDialog(
     onDismiss: () -> Unit,
 ) {
     val language = LocalAppLanguage.current
+    val fallbackMessengerColor = MaterialTheme.colorScheme.secondary
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(uiText("최근 대화에 메시지 보내기", "Message a recent conversation")) },
@@ -931,7 +1026,7 @@ private fun ConversationPickerDialog(
                     key = { "compose:${it.id.packageName}:${it.id.conversationId}" },
                 ) { conversation ->
                     val replyMessage = conversation.latestIncomingMessage
-                    val app = appMeta(replyMessage.packageName, language)
+                    val app = appMeta(replyMessage.packageName, language, fallbackMessengerColor)
                     val canSendNow = remember(conversation, availabilityVersion) {
                         NotificationReplyStore.isAvailable(
                             replyMessage.rawNotificationKey,
@@ -986,6 +1081,96 @@ private fun ConversationPickerDialog(
     )
 }
 
+@OptIn(ExperimentalMaterialApi::class)
+@Composable
+private fun SwipeableConversationRow(
+    conversation: ConversationSummary,
+    availabilityVersion: Long,
+    onMarkHandled: () -> Unit,
+    onDeleteRequest: () -> Unit,
+    onClick: () -> Unit,
+) {
+    val dismissState = rememberDismissState { value ->
+        when (value) {
+            DismissValue.DismissedToEnd -> {
+                if (conversation.needsReply) onMarkHandled()
+                false
+            }
+            DismissValue.DismissedToStart -> {
+                onDeleteRequest()
+                false
+            }
+            DismissValue.Default -> true
+        }
+    }
+    val directions = if (conversation.needsReply) {
+        setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart)
+    } else {
+        setOf(DismissDirection.EndToStart)
+    }
+
+    SwipeToDismiss(
+        state = dismissState,
+        directions = directions,
+        background = {
+            val deleting = dismissState.dismissDirection == DismissDirection.EndToStart
+            val containerColor = if (deleting) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            }
+            val contentColor = if (deleting) {
+                MaterialTheme.colorScheme.onErrorContainer
+            } else {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(containerColor)
+                    .padding(horizontal = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (deleting) Arrangement.End else Arrangement.Start,
+            ) {
+                if (deleting) {
+                    Text(
+                        uiText("삭제", "Delete"),
+                        color = contentColor,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        Icons.Outlined.DeleteSweep,
+                        contentDescription = null,
+                        tint = contentColor,
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined.Check,
+                        contentDescription = null,
+                        tint = contentColor,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        uiText("완료", "Handled"),
+                        color = contentColor,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        },
+        dismissContent = {
+            Surface(color = MaterialTheme.colorScheme.background) {
+                ConversationRow(
+                    conversation = conversation,
+                    availabilityVersion = availabilityVersion,
+                    onClick = onClick,
+                )
+            }
+        },
+    )
+}
+
 @Composable
 private fun ConversationRow(
     conversation: ConversationSummary,
@@ -993,7 +1178,11 @@ private fun ConversationRow(
     onClick: () -> Unit,
 ) {
     val language = LocalAppLanguage.current
-    val app = appMeta(conversation.latestMessage.packageName, language)
+    val app = appMeta(
+        conversation.latestMessage.packageName,
+        language,
+        MaterialTheme.colorScheme.secondary,
+    )
     val replyMessage = conversation.latestIncomingMessage
     val canSendNow = remember(conversation, availabilityVersion) {
         NotificationReplyStore.isAvailable(
@@ -1146,7 +1335,11 @@ private fun ConversationDetailScreen(
     onManageContact: () -> Unit,
 ) {
     val language = LocalAppLanguage.current
-    val app = appMeta(conversation.id.packageName, language)
+    val app = appMeta(
+        conversation.id.packageName,
+        language,
+        MaterialTheme.colorScheme.secondary,
+    )
     val listState = rememberLazyListState()
 
     LaunchedEffect(conversation.latestMessage.id) {
@@ -1366,7 +1559,11 @@ private fun MessageBubble(message: CapturedMessage) {
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                appMeta(message.packageName, language).name,
+                appMeta(
+                    message.packageName,
+                    language,
+                    MaterialTheme.colorScheme.secondary,
+                ).name,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1396,8 +1593,19 @@ private fun MessageBubble(message: CapturedMessage) {
 
 @Composable
 private fun AttachmentPreview(message: CapturedMessage) {
-    val decodedBitmap = remember(message.attachmentPath) {
-        message.attachmentPath?.let(BitmapFactory::decodeFile)
+    val maxPreviewPixels = with(LocalDensity.current) {
+        (260.dp / 0.75f).roundToPx()
+    }
+    val decodedBitmap by produceState<Bitmap?>(
+        initialValue = null,
+        key1 = message.attachmentPath,
+        key2 = maxPreviewPixels,
+    ) {
+        value = message.attachmentPath?.let { path ->
+            withContext(Dispatchers.IO) {
+                decodeSampledBitmap(path, maxPreviewPixels)
+            }
+        }
     }
     val canShowImage = message.attachmentKind == AttachmentKinds.IMAGE && decodedBitmap != null
 
@@ -1952,7 +2160,7 @@ private fun ReplyDialog(viewModel: ReplyHubViewModel) {
     val state by viewModel.composer.collectAsStateWithLifecycle()
     val replyAvailabilityVersion by NotificationReplyStore.changes.collectAsStateWithLifecycle()
     val message = state.message ?: return
-    val app = appMeta(message.packageName, language)
+    val app = appMeta(message.packageName, language, MaterialTheme.colorScheme.secondary)
     val isDirectMessage = state.mode == ComposerMode.DIRECT_MESSAGE
     val canSendNow = remember(message, replyAvailabilityVersion) {
         NotificationReplyStore.isAvailable(
@@ -2487,14 +2695,27 @@ private fun MessengerIcon(
     appName: String? = null,
 ) {
     val context = LocalContext.current
-    val app = appMeta(packageName, LocalAppLanguage.current)
-    val bitmap = remember(packageName) {
-        runCatching {
-            context.packageManager
-                .getApplicationIcon(packageName)
-                .toBitmap(width = 96, height = 96)
-                .asImageBitmap()
-        }.getOrNull()
+    val app = appMeta(
+        packageName,
+        LocalAppLanguage.current,
+        MaterialTheme.colorScheme.secondary,
+    )
+    val bitmap by produceState<ImageBitmap?>(
+        initialValue = MessengerIconBitmapCache.get(packageName),
+        key1 = packageName,
+        key2 = context,
+    ) {
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                MessengerIconBitmapCache.get(packageName) ?: runCatching {
+                    context.packageManager
+                        .getApplicationIcon(packageName)
+                        .toBitmap(width = 96, height = 96)
+                        .asImageBitmap()
+                        .also { MessengerIconBitmapCache.put(packageName, it) }
+                }.getOrNull()
+            }
+        }
     }
     val shape = RoundedCornerShape(6.dp)
 
@@ -2504,9 +2725,10 @@ private fun MessengerIcon(
             .padding(2.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
+        val loadedBitmap = bitmap
+        if (loadedBitmap != null) {
             Image(
-                bitmap = bitmap,
+                bitmap = loadedBitmap,
                 contentDescription = uiText(
                     "${appName ?: app.name} 아이콘",
                     "${appName ?: app.name} icon",
@@ -2555,11 +2777,15 @@ private fun formatDay(timestamp: Long, language: AppLanguage): String =
         language.locale,
     ).format(Date(timestamp))
 
-private fun appMeta(packageName: String, language: AppLanguage): MessengerMeta {
+private fun appMeta(
+    packageName: String,
+    language: AppLanguage,
+    fallbackColor: Color,
+): MessengerMeta {
     val definition = MessengerCatalog.find(packageName)
         ?: return MessengerMeta(
             language.text("메시지", "Messages"),
-            Color(0xFF5F6368),
+            fallbackColor,
             "M",
         )
     return MessengerMeta(
@@ -2608,7 +2834,10 @@ private fun englishCount(
 private fun englishNeedsReply(count: Int): String =
     if (count == 1) "1 needs reply" else "$count need replies"
 
-private fun loadLaunchableApps(context: android.content.Context): List<InstalledApp> {
+private suspend fun loadLaunchableApps(context: android.content.Context): List<InstalledApp> =
+    LaunchableAppsCache.load(context.applicationContext)
+
+private fun queryLaunchableApps(context: android.content.Context): List<InstalledApp> {
     val packageManager = context.packageManager
     val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
     val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -2630,4 +2859,53 @@ private fun loadLaunchableApps(context: android.content.Context): List<Installed
         }
         .distinctBy { it.packageName }
         .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
+}
+
+private object LaunchableAppsCache {
+    private const val CACHE_MILLIS = 30_000L
+    private val lock = Any()
+    private var loadedAt = 0L
+    private var apps: List<InstalledApp> = emptyList()
+
+    suspend fun load(context: android.content.Context): List<InstalledApp> =
+        withContext(Dispatchers.IO) {
+            synchronized(lock) {
+                val now = System.currentTimeMillis()
+                if (loadedAt > 0L && now - loadedAt < CACHE_MILLIS) {
+                    return@synchronized apps
+                }
+                queryLaunchableApps(context).also { loaded ->
+                    apps = loaded
+                    loadedAt = now
+                }
+            }
+        }
+}
+
+private object MessengerIconBitmapCache {
+    private val cache = LruCache<String, ImageBitmap>(32)
+
+    fun get(packageName: String): ImageBitmap? = synchronized(cache) {
+        cache.get(packageName)
+    }
+
+    fun put(packageName: String, bitmap: ImageBitmap) = synchronized(cache) {
+        cache.put(packageName, bitmap)
+    }
+}
+
+private fun decodeSampledBitmap(path: String, maxDimension: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+    val target = maxDimension.coerceAtLeast(1)
+    var sampleSize = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >= target) {
+        sampleSize *= 2
+    }
+    return BitmapFactory.decodeFile(
+        path,
+        BitmapFactory.Options().apply { inSampleSize = sampleSize },
+    )
 }

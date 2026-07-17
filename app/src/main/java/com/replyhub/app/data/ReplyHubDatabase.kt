@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [CapturedMessage::class], version = 6, exportSchema = false)
+@Database(entities = [CapturedMessage::class], version = 7, exportSchema = false)
 abstract class ReplyHubDatabase : RoomDatabase() {
     abstract fun capturedMessageDao(): CapturedMessageDao
 
@@ -24,6 +24,7 @@ abstract class ReplyHubDatabase : RoomDatabase() {
                     MIGRATION_3_4,
                     MIGRATION_4_5,
                     MIGRATION_5_6,
+                    MIGRATION_6_7,
                 )
                 .build()
 
@@ -95,6 +96,15 @@ abstract class ReplyHubDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS " +
                         "index_captured_messages_packageName_conversationId " +
                         "ON captured_messages(packageName, conversationId)",
+                )
+            }
+        }
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE captured_messages " +
+                        "ADD COLUMN isHandled INTEGER NOT NULL DEFAULT 0",
                 )
             }
         }

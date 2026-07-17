@@ -58,6 +58,17 @@ class MessageRepository(private val dao: CapturedMessageDao) {
 
     suspend fun deleteOlderThan(timestamp: Long): Int = dao.deleteOlderThan(timestamp)
 
+    suspend fun updateHandled(messageId: Long, handled: Boolean): Int =
+        dao.updateHandled(messageId, handled)
+
+    suspend fun attachmentPathsForConversation(
+        packageName: String,
+        conversationId: String,
+    ): List<String> = dao.attachmentPathsForConversation(packageName, conversationId)
+
+    suspend fun deleteConversation(packageName: String, conversationId: String): Int =
+        dao.deleteConversation(packageName, conversationId)
+
     suspend fun updateTranslations(
         messageId: Long,
         expectedOriginalText: String,

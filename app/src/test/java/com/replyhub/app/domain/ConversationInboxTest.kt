@@ -156,6 +156,28 @@ class ConversationInboxTest {
     }
 
     @Test
+    fun `manually handled incoming message no longer needs a reply`() {
+        val conversation = buildConversationInbox(
+            listOf(message(id = 1, sender = "민수", timestamp = 10).copy(isHandled = true)),
+        ).single()
+
+        assertEquals(false, conversation.needsReply)
+        assertEquals(1, summarizeInbox(listOf(conversation)).handledCount)
+    }
+
+    @Test
+    fun `new incoming message reopens a handled conversation`() {
+        val conversation = buildConversationInbox(
+            listOf(
+                message(id = 1, sender = "민수", timestamp = 10).copy(isHandled = true),
+                message(id = 2, sender = "민수", timestamp = 20),
+            ),
+        ).single()
+
+        assertEquals(true, conversation.needsReply)
+    }
+
+    @Test
     fun `foreign language summary follows selected app language`() {
         val conversations = buildConversationInbox(
             listOf(

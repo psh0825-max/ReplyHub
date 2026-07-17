@@ -26,6 +26,7 @@ interface CapturedMessageDao {
         SET sender = :sender,
             conversationId = :conversationId,
             conversationTitle = :conversationTitle,
+            isHandled = CASE WHEN originalText = :originalText THEN isHandled ELSE 0 END,
             originalText = :originalText,
             detectedLanguage = :detectedLanguage,
             translatedText = :translatedText,
@@ -128,6 +129,25 @@ interface CapturedMessageDao {
         englishTranslation: String,
         priority: String,
     ): Int
+
+    @Query("UPDATE captured_messages SET isHandled = :handled WHERE id = :messageId")
+    suspend fun updateHandled(messageId: Long, handled: Boolean): Int
+
+    @Query(
+        "SELECT attachmentPath FROM captured_messages " +
+            "WHERE packageName = :packageName AND conversationId = :conversationId " +
+            "AND attachmentPath IS NOT NULL",
+    )
+    suspend fun attachmentPathsForConversation(
+        packageName: String,
+        conversationId: String,
+    ): List<String>
+
+    @Query(
+        "DELETE FROM captured_messages " +
+            "WHERE packageName = :packageName AND conversationId = :conversationId",
+    )
+    suspend fun deleteConversation(packageName: String, conversationId: String): Int
 
     @Query(
         """

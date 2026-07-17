@@ -8,7 +8,6 @@ import com.replyhub.app.ReplyHubApplication
 import com.replyhub.app.data.AppLanguage
 import com.replyhub.app.data.CapturedMessage
 import com.replyhub.app.data.needsTranslationRefresh
-import com.replyhub.app.data.PrivacySettingsStore
 import com.replyhub.app.domain.DemoMessages
 import com.replyhub.app.domain.DraftReply
 import com.replyhub.app.domain.ConversationId
@@ -25,9 +24,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.UUID
 import java.io.File
-import java.util.concurrent.TimeUnit
+import java.util.UUID
 
 enum class ComposerMode {
     ASSISTED_REPLY,
@@ -377,14 +375,8 @@ class ReplyHubViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun enforceRetention() {
-        val days = replyHubApplication.privacySettingsStore.retentionDays.value
-        if (days == PrivacySettingsStore.KEEP_FOREVER) return
         viewModelScope.launch(Dispatchers.IO) {
-            val cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days.toLong())
-            repository.attachmentPathsOlderThan(cutoff).forEach { path ->
-                runCatching { File(path).delete() }
-            }
-            repository.deleteOlderThan(cutoff)
+            replyHubApplication.messageRetentionManager.pruneNow()
         }
     }
 
@@ -427,6 +419,30 @@ class ReplyHubViewModel(application: Application) : AndroidViewModel(application
 
     fun unlinkContact(contactId: String) {
         replyHubApplication.contactLinkStore.unlink(contactId)
+    }
+
+    fun setMessageHandled(messageId: Long, handled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateHandled(messageId, handled)
+        }
+    }
+
+    fun deleteConversation(channels: List<ConversationId>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val distinctChannels = channels.distinctBy { it.packageName to it.conversationId }
+            distinctChannels
+                .flatMap { channel ->
+                    repository.attachmentPathsForConversation(
+                        packageName = channel.packageName,
+                        conversationId = channel.conversationId,
+                    )
+                }
+                .distinct()
+                .forEach { path -> runCatching { File(path).delete() } }
+            distinctChannels.forEach { channel ->
+                repository.deleteConversation(channel.packageName, channel.conversationId)
+            }
+        }
     }
 
     fun clearMessages() {

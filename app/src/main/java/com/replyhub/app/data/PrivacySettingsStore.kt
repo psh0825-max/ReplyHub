@@ -38,6 +38,15 @@ class PrivacySettingsStore(context: Context) {
         _retentionDays.value = days
     }
 
+    fun isRetentionPruneDue(nowMillis: Long): Boolean = isRetentionRunDue(
+        lastRunMillis = preferences.getLong(KEY_LAST_RETENTION_PRUNE, 0L),
+        nowMillis = nowMillis,
+    )
+
+    fun markRetentionPruned(atMillis: Long) {
+        preferences.edit().putLong(KEY_LAST_RETENTION_PRUNE, atMillis).apply()
+    }
+
     private fun enabledPackageSnapshot(): Set<String> =
         MessengerCatalog.packages - _disabledPackages.value
 
@@ -49,5 +58,16 @@ class PrivacySettingsStore(context: Context) {
         private const val PREFERENCES_NAME = "replyhub_privacy_settings"
         private const val KEY_DISABLED_PACKAGES = "disabled_packages"
         private const val KEY_RETENTION_DAYS = "retention_days"
+        private const val KEY_LAST_RETENTION_PRUNE = "last_retention_prune"
     }
 }
+
+internal const val RETENTION_PRUNE_INTERVAL_MILLIS = 24L * 60L * 60L * 1_000L
+
+internal fun isRetentionRunDue(
+    lastRunMillis: Long,
+    nowMillis: Long,
+    intervalMillis: Long = RETENTION_PRUNE_INTERVAL_MILLIS,
+): Boolean = lastRunMillis <= 0L ||
+    nowMillis < lastRunMillis ||
+    nowMillis - lastRunMillis >= intervalMillis

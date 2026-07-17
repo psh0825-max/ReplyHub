@@ -35,6 +35,7 @@ data class CapturedMessage(
     val englishTranslatedText: String = "",
     val conversationId: String = "",
     val conversationTitle: String = "",
+    val isHandled: Boolean = false,
 )
 
 val CapturedMessage.resolvedConversationId: String
