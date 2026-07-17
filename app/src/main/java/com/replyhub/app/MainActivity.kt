@@ -1995,10 +1995,13 @@ private fun ReplyDialog(viewModel: ReplyHubViewModel) {
         title = {
             Text(
                 if (isDirectMessage) {
-                    language.text("${message.sender}에게 메시지", "Message ${message.sender}")
+                    language.text("메시지 · ${message.sender}", "Message · ${message.sender}")
                 } else {
-                    language.text("${message.sender}에게 답장", "Reply to ${message.sender}")
+                    language.text("답장 · ${message.sender}", "Reply · ${message.sender}")
                 },
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         },
         text = {
