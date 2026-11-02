@@ -24,6 +24,7 @@ ReplyHub is an Android notification triage hub for major consumer and workplace 
 - Successful GPT results for synthetic demo messages can be cached on-device for recording resilience. A cached result is labeled as such and web-search results are cached only when citations were returned.
 - SpeechRecognizer converts Korean speech into reply instructions.
 - RemoteInput routes by exact notification key or one unambiguous conversation ID. Clipboard + launch intent handles unsupported actions and asks the user to confirm whether the reply was sent before adding it to history.
+- Optional accessibility auto-send covers messengers whose notifications expose no RemoteInput action (such as WeChat): ReplyHub opens the exact conversation via the notification's content intent, types the reply into the input field, taps the send button, and returns to ReplyHub. The service acts only immediately after the user presses send in ReplyHub, is limited to catalog packages, and collects no screen content.
 - Users can disable capture per installed messenger and choose 7, 30, 90 days, or no automatic deletion. The default is 30 days.
 
 ## Run
@@ -42,9 +43,9 @@ Captured messages are stored in the app's sandboxed local Room database, exclude
 
 ## Platform limitations
 
-- Direct sending uses a messenger notification's live Android `RemoteInput` action. If the notification was opened, dismissed, or does not provide a reply action, ReplyHub copies the answer and opens the messenger instead.
+- Direct sending uses a messenger notification's live Android `RemoteInput` action. If the notification does not provide a reply action, the optional accessibility auto-send can type and send the reply in the opened conversation. If the notification was opened or dismissed, or auto-send is off or cannot finish, ReplyHub copies the answer and opens the messenger instead.
 - The new-message picker contains people observed in ReplyHub notification history, not the messenger's private contact database. Personal contact lists are not exposed by a common Android API.
-- ReplyHub does not automate messenger interfaces with AccessibilityService. This keeps the hackathon build safer and less brittle, but means it cannot guarantee background sending for every app and old conversation.
+- Messenger interface automation is limited to the optional, user-enabled accessibility auto-send. It depends on each messenger's screen layout, needs a live notification to open the right conversation, and falls back to copy-and-confirm whenever a step cannot be verified. Some messengers, including WeChat 8.0.79, hide their screens from accessibility services entirely; ReplyHub detects this on the first attempt, remembers it per messenger version, and opens the conversation for pasting instead. Auto-send is unavailable when Android's Advanced Protection mode is on, because that mode restricts accessibility services to dedicated accessibility tools. On Samsung devices, battery auto-optimization can leave the service stuck unbound; adding ReplyHub to the never-sleeping apps list avoids this.
 - Installed-app search lists apps that expose a launcher activity for the current Android profile. Hidden services, disabled packages, and apps isolated in another profile are intentionally not enumerated.
 
 ## Architecture

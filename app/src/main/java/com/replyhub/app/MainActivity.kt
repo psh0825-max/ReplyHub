@@ -147,7 +147,10 @@ import com.replyhub.app.domain.summarizeInbox
 import com.replyhub.app.messaging.MessengerCatalog
 import com.replyhub.app.notifications.AttachmentKinds
 import com.replyhub.app.notifications.NotificationReplyStore
+import com.replyhub.app.notifications.ReplyHubAutoSendService
 import com.replyhub.app.notifications.ReplyHubNotificationListener
+import com.replyhub.app.notifications.ReplySendPath
+import com.replyhub.app.notifications.canSendNow
 import com.replyhub.app.ui.ComposerMode
 import com.replyhub.app.ui.AiSettingsState
 import com.replyhub.app.ui.ReplyHubTheme
@@ -197,6 +200,7 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
     val aiSettings by viewModel.aiSettings.collectAsStateWithLifecycle()
     val demoMode by viewModel.demoMode.collectAsStateWithLifecycle()
     val enabledCapturePackages by viewModel.enabledCapturePackages.collectAsStateWithLifecycle()
+    val autoSendPackages by viewModel.autoSendPackages.collectAsStateWithLifecycle()
     val retentionDays by viewModel.retentionDays.collectAsStateWithLifecycle()
     val appLanguage = LocalAppLanguage.current
     val replyAvailabilityVersion by NotificationReplyStore.changes.collectAsStateWithLifecycle()
@@ -214,6 +218,9 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
     var notificationAccess by remember {
         mutableStateOf(hasNotificationAccess(context.packageName, context))
     }
+    var autoSendEnabled by remember {
+        mutableStateOf(ReplyHubAutoSendService.isEnabled(context))
+    }
 
     LaunchedEffect(context, installedAppsRefreshVersion) {
         installedApps = loadLaunchableApps(context)
@@ -223,6 +230,7 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationAccess = hasNotificationAccess(context.packageName, context)
+                autoSendEnabled = ReplyHubAutoSendService.isEnabled(context)
                 installedAppsRefreshVersion += 1
                 ReplyHubNotificationListener.refreshReplyTargets()
             }
@@ -238,16 +246,16 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
             it.id.packageName == selectedPackage && it.id.conversationId == selectedConversationId
         }
     }
-    val selectedCanSendNow = remember(selectedConversation, replyAvailabilityVersion) {
+    val selectedSendPath = remember(selectedConversation, replyAvailabilityVersion, autoSendEnabled) {
         selectedConversation?.let { conversation ->
             val replyMessage = conversation.latestIncomingMessage
-            NotificationReplyStore.isAvailable(
+            NotificationReplyStore.sendPath(
                 replyMessage.rawNotificationKey,
                 replyMessage.packageName,
                 replyMessage.sender,
                 replyMessage.resolvedConversationId,
             )
-        } ?: false
+        } ?: ReplySendPath.MANUAL
     }
 
     if (selectedConversation == null) {
@@ -292,7 +300,7 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
         }
         ConversationDetailScreen(
             conversation = selectedConversation,
-            canSendNow = selectedCanSendNow,
+            sendPath = selectedSendPath,
             onBack = {
                 selectedPackage = null
                 selectedConversationId = null
@@ -324,19 +332,25 @@ private fun ReplyHubApp(viewModel: ReplyHubViewModel = viewModel()) {
             state = aiSettings,
             appLanguage = appLanguage,
             notificationAccess = notificationAccess,
+            autoSendEnabled = autoSendEnabled,
             messageCount = messages.size,
             demoMode = demoMode,
             enabledCapturePackages = enabledCapturePackages,
+            autoSendPackages = autoSendPackages,
             retentionDays = retentionDays,
             onSaveAndTest = viewModel::saveAndTestApiKey,
             onRemoveApiKey = viewModel::removeApiKey,
             onOpenNotificationSettings = {
                 context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             },
+            onOpenAccessibilitySettings = {
+                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            },
             onResetDemo = viewModel::resetDemoData,
             onDemoModeChange = viewModel::setDemoMode,
             onAppLanguageChange = viewModel::setAppLanguage,
             onCaptureEnabledChange = viewModel::setCaptureEnabled,
+            onAutoSendAppChange = viewModel::setAutoSendEnabled,
             onRetentionDaysChange = viewModel::setRetentionDays,
             onClearMessages = viewModel::clearMessages,
             onDismiss = { showSettings = false },
@@ -1028,12 +1042,12 @@ private fun ConversationPickerDialog(
                     val replyMessage = conversation.latestIncomingMessage
                     val app = appMeta(replyMessage.packageName, language, fallbackMessengerColor)
                     val canSendNow = remember(conversation, availabilityVersion) {
-                        NotificationReplyStore.isAvailable(
+                        NotificationReplyStore.sendPath(
                             replyMessage.rawNotificationKey,
                             replyMessage.packageName,
                             replyMessage.sender,
                             replyMessage.resolvedConversationId,
-                        )
+                        ).canSendNow
                     }
                     Row(
                         modifier = Modifier
@@ -1185,12 +1199,12 @@ private fun ConversationRow(
     )
     val replyMessage = conversation.latestIncomingMessage
     val canSendNow = remember(conversation, availabilityVersion) {
-        NotificationReplyStore.isAvailable(
+        NotificationReplyStore.sendPath(
             replyMessage.rawNotificationKey,
             replyMessage.packageName,
             replyMessage.sender,
             replyMessage.resolvedConversationId,
-        )
+        ).canSendNow
     }
     Row(
         modifier = Modifier
@@ -1329,7 +1343,7 @@ private fun ConversationRow(
 @Composable
 private fun ConversationDetailScreen(
     conversation: ConversationSummary,
-    canSendNow: Boolean,
+    sendPath: ReplySendPath,
     onBack: () -> Unit,
     onReply: () -> Unit,
     onManageContact: () -> Unit,
@@ -1424,13 +1438,29 @@ private fun ConversationDetailScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            if (canSendNow) {
-                                uiText("활성 알림으로 바로 전송", "Send directly via active notification")
-                            } else {
-                                uiText(
-                                    "활성 알림 없음 · 복사 후 앱에서 전송",
-                                    "No active notification · copy and send in the app",
-                                )
+                            when (sendPath) {
+                                ReplySendPath.REMOTE_INPUT ->
+                                    uiText("활성 알림으로 바로 전송", "Send directly via active notification")
+                                ReplySendPath.AUTO_SEND ->
+                                    uiText(
+                                        "메신저를 열어 자동 입력 후 전송",
+                                        "Opens the messenger and sends automatically",
+                                    )
+                                ReplySendPath.AUTO_SEND_OFF ->
+                                    uiText(
+                                        "자동 전송 꺼짐 · 복사 후 앱에서 전송",
+                                        "Auto-send off · copy and send in the app",
+                                    )
+                                ReplySendPath.SCREEN_HIDDEN ->
+                                    uiText(
+                                        "자동 입력 차단 앱 · 대화를 열고 붙여넣기",
+                                        "App blocks auto-typing · opens the chat to paste",
+                                    )
+                                ReplySendPath.MANUAL ->
+                                    uiText(
+                                        "활성 알림 없음 · 복사 후 앱에서 전송",
+                                        "No active notification · copy and send in the app",
+                                    )
                             },
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
@@ -1692,17 +1722,21 @@ private fun AppSettingsDialog(
     state: AiSettingsState,
     appLanguage: AppLanguage,
     notificationAccess: Boolean,
+    autoSendEnabled: Boolean,
     messageCount: Int,
     demoMode: Boolean,
     enabledCapturePackages: Set<String>,
+    autoSendPackages: Set<String>,
     retentionDays: Int,
     onSaveAndTest: (String) -> Unit,
     onRemoveApiKey: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onResetDemo: () -> Unit,
     onDemoModeChange: (Boolean) -> Unit,
     onAppLanguageChange: (AppLanguage) -> Unit,
     onCaptureEnabledChange: (String, Boolean) -> Unit,
+    onAutoSendAppChange: (String, Boolean) -> Unit,
     onRetentionDaysChange: (Int) -> Unit,
     onClearMessages: () -> Unit,
     onDismiss: () -> Unit,
@@ -1714,6 +1748,8 @@ private fun AppSettingsDialog(
     var submittedKey by remember { mutableStateOf(false) }
     var showClearConfirmation by remember { mutableStateOf(false) }
     var showCaptureApps by remember { mutableStateOf(false) }
+    var showAutoSendApps by remember { mutableStateOf(false) }
+    var showAutoSendDisclosure by remember { mutableStateOf(false) }
     val installedCaptureApps = remember(context) {
         MessengerCatalog.apps.filter { app ->
             context.packageManager.getLaunchIntentForPackage(app.packageName) != null
@@ -1919,6 +1955,111 @@ private fun AppSettingsDialog(
                     )
                 }
 
+                OutlinedButton(
+                    onClick = {
+                        if (autoSendEnabled) {
+                            onOpenAccessibilitySettings()
+                        } else {
+                            showAutoSendDisclosure = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Outlined.Send, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        if (autoSendEnabled) {
+                            uiText("자동 전송 사용 중 (접근성)", "Auto-send enabled (accessibility)")
+                        } else {
+                            uiText("자동 전송 켜기 (접근성)", "Enable auto-send (accessibility)")
+                        },
+                    )
+                }
+                Text(
+                    uiText(
+                        "위챗처럼 알림에 빠른 답장이 없는 메신저는 접근성 서비스가 대화를 열어 " +
+                            "답장을 입력하고 전송 버튼을 눌러 줍니다. ReplyHub에서 전송을 누른 " +
+                            "직후에만 동작하며 화면 내용을 수집하지 않습니다.",
+                        "For messengers without a quick-reply notification action (like WeChat), " +
+                            "the accessibility service opens the conversation, types your reply, " +
+                            "and taps send. It only acts right after you press send in ReplyHub " +
+                            "and never collects screen content.",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+                    Text(
+                        uiText(
+                            "삼성 기기는 자동 최적화가 ReplyHub를 재우면 자동 전송이 멈출 수 있어요. " +
+                                "설정 → 배터리 → 백그라운드 사용 제한에서 ReplyHub를 '절전 예외 앱'에 추가해 주세요.",
+                            "On Samsung devices, battery auto-optimization can stop auto-send. Add ReplyHub " +
+                                "to 'Never sleeping apps' under Settings → Battery → Background usage limits.",
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                if (autoSendEnabled && installedCaptureApps.isNotEmpty()) {
+                    val autoSendOnCount = installedCaptureApps.count { it.packageName in autoSendPackages }
+                    OutlinedButton(
+                        onClick = { showAutoSendApps = !showAutoSendApps },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.Send, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            if (showAutoSendApps) {
+                                uiText("자동 전송 앱 접기", "Hide auto-send apps")
+                            } else {
+                                appLanguage.text(
+                                    "자동 전송 앱 선택 · ${autoSendOnCount}개 켜짐",
+                                    "Choose auto-send apps · $autoSendOnCount on",
+                                )
+                            },
+                        )
+                    }
+                    if (showAutoSendApps) {
+                        Text(
+                            uiText(
+                                "인스타그램·X처럼 좋아요·멘션 알림이 많은 앱은 답장이 공개 댓글창에 " +
+                                    "입력될 수 있어 기본으로 꺼져 있습니다.",
+                                "Feed apps like Instagram or X are off by default because their " +
+                                    "like and mention notifications could put a reply into a public comment box.",
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        installedCaptureApps.forEach { app ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                MessengerIcon(
+                                    packageName = app.packageName,
+                                    modifier = Modifier.size(30.dp),
+                                )
+                                Text(
+                                    if (appLanguage == AppLanguage.KOREAN) {
+                                        app.displayName
+                                    } else {
+                                        app.englishDisplayName
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(
+                                    checked = app.packageName in autoSendPackages,
+                                    onCheckedChange = {
+                                        onAutoSendAppChange(app.packageName, it)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (installedCaptureApps.isNotEmpty()) {
                     OutlinedButton(
                         onClick = { showCaptureApps = !showCaptureApps },
@@ -2104,6 +2245,68 @@ private fun AppSettingsDialog(
             },
         )
     }
+
+    if (showAutoSendDisclosure) {
+        AlertDialog(
+            onDismissRequest = { showAutoSendDisclosure = false },
+            title = { Text(uiText("자동 전송을 켜기 전에", "Before you turn on auto-send")) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        uiText(
+                            "ReplyHub는 Android 접근성 서비스를 사용해, 빠른 답장이 없는 메신저에서 " +
+                                "대신 답장을 입력하고 전송 버튼을 누릅니다.",
+                            "ReplyHub uses an Android accessibility service to type your reply and tap " +
+                                "send in messengers that have no quick reply.",
+                        ),
+                    )
+                    Text(
+                        uiText(
+                            "• 접근하는 정보: 전송하는 동안 해당 메신저 화면의 구성(입력창과 전송 버튼 위치)\n" +
+                                "• 동작 시점: ReplyHub에서 전송을 누른 직후 몇 초 동안만\n" +
+                                "• 하지 않는 것: 화면 내용 저장·전송, 다른 앱 관찰, 사용자가 누르지 않은 전송\n" +
+                                "• 앱별로 켜고 끌 수 있고, 언제든 접근성 설정에서 끌 수 있습니다",
+                            "• What it reads: the messenger screen's layout (input field and send button) while sending\n" +
+                                "• When: only for a few seconds after you press send in ReplyHub\n" +
+                                "• What it never does: store or send screen content, watch other apps, or send without you\n" +
+                                "• You can choose apps individually and turn it off anytime in accessibility settings",
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        uiText(
+                            "직접 설치한 앱이라 '제한된 설정' 안내가 뜨면: 설정 → 애플리케이션 → " +
+                                "ReplyHub → 오른쪽 위 ⋮ → '제한된 설정 허용' 후 다시 켜 주세요.",
+                            "If Android shows a 'Restricted setting' notice for this sideloaded app: " +
+                                "Settings → Apps → ReplyHub → ⋮ → 'Allow restricted settings', then turn it on again.",
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAutoSendDisclosure = false
+                        onOpenAccessibilitySettings()
+                    },
+                ) {
+                    Text(uiText("동의하고 설정 열기", "Agree and open settings"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoSendDisclosure = false }) {
+                    Text(uiText("취소", "Cancel"))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -2162,14 +2365,15 @@ private fun ReplyDialog(viewModel: ReplyHubViewModel) {
     val message = state.message ?: return
     val app = appMeta(message.packageName, language, MaterialTheme.colorScheme.secondary)
     val isDirectMessage = state.mode == ComposerMode.DIRECT_MESSAGE
-    val canSendNow = remember(message, replyAvailabilityVersion) {
-        NotificationReplyStore.isAvailable(
+    val sendPath = remember(message, replyAvailabilityVersion) {
+        NotificationReplyStore.sendPath(
             message.rawNotificationKey,
             message.packageName,
             message.sender,
             message.resolvedConversationId,
         )
     }
+    val canSendNow = sendPath.canSendNow
 
     val voiceController = remember(language) {
         VoiceInputController(
@@ -2319,7 +2523,7 @@ private fun ReplyDialog(viewModel: ReplyHubViewModel) {
 
                 DeliveryStatusBand(
                     app = app,
-                    canSendNow = canSendNow,
+                    sendPath = sendPath,
                 )
 
                 if (!isDirectMessage) state.draft?.let { draft ->
@@ -2628,8 +2832,9 @@ private fun ReplyContextPreview(
 @Composable
 private fun DeliveryStatusBand(
     app: MessengerMeta,
-    canSendNow: Boolean,
+    sendPath: ReplySendPath,
 ) {
+    val canSendNow = sendPath.canSendNow
     Surface(
         color = if (canSendNow) {
             MaterialTheme.colorScheme.primaryContainer
@@ -2652,10 +2857,13 @@ private fun DeliveryStatusBand(
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    if (canSendNow) {
-                        uiText("바로 전송 가능", "Direct send available")
-                    } else {
-                        uiText(
+                    when (sendPath) {
+                        ReplySendPath.REMOTE_INPUT -> uiText("바로 전송 가능", "Direct send available")
+                        ReplySendPath.AUTO_SEND -> uiText("자동 전송 가능", "Auto-send available")
+                        ReplySendPath.AUTO_SEND_OFF,
+                        ReplySendPath.SCREEN_HIDDEN,
+                        ReplySendPath.MANUAL,
+                        -> uiText(
                             "복사 후 ${app.name}에서 전송",
                             "Copy and send in ${app.name}",
                         )
@@ -2664,15 +2872,30 @@ private fun DeliveryStatusBand(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    if (canSendNow) {
-                        uiText(
+                    when (sendPath) {
+                        ReplySendPath.REMOTE_INPUT -> uiText(
                             "활성 알림의 답장 기능을 사용합니다.",
                             "Uses the reply action from the active notification.",
                         )
-                    } else {
-                        uiText(
-                            "답장 권한이 없어 자동 전송하지 않습니다.",
-                            "Automatic sending is unavailable without reply permission.",
+                        ReplySendPath.AUTO_SEND -> uiText(
+                            "메신저를 열어 자동 입력·전송한 뒤 ReplyHub로 돌아옵니다.",
+                            "Opens the messenger, sends automatically, then returns to ReplyHub.",
+                        )
+                        ReplySendPath.AUTO_SEND_OFF -> uiText(
+                            "설정에서 자동 전송을 켜고 이 앱을 허용하면 바로 보낼 수 있어요.",
+                            "Turn on auto-send in settings and allow this app to send directly.",
+                        )
+                        ReplySendPath.SCREEN_HIDDEN -> uiText(
+                            "${app.name} 앱은 접근성 서비스에 화면을 공개하지 않아 자동 입력이 불가능해요. " +
+                                "대화를 열어 드리니 붙여넣어 보내 주세요.",
+                            "${app.name} hides its screen from accessibility services, so auto-typing " +
+                                "isn't possible. ReplyHub opens the chat for you to paste.",
+                        )
+                        ReplySendPath.MANUAL -> uiText(
+                            "이 대화의 알림이 지워졌거나 만료되어 바로 전송할 수 없어요. " +
+                                "새 메시지 알림이 오면 다시 가능해요.",
+                            "This conversation's notification is gone or expired. " +
+                                "Direct send returns with the next incoming notification.",
                         )
                     },
                     style = MaterialTheme.typography.bodySmall,

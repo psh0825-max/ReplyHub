@@ -44,7 +44,7 @@ internal fun selectReplyTargetKey(
             targetPackageName = it.packageName,
             notificationKey = notificationKey,
             packageName = packageName,
-        )
+        ) && it.stillDescribes(conversationId, sender)
     }?.let { return it.notificationKey }
 
     val conversationMatches = targets.filter {
@@ -62,3 +62,10 @@ internal fun selectReplyTargetKey(
         it.packageName == packageName && replySenderMatches(sender, it.senderAliases)
     }.singleOrNull()?.notificationKey
 }
+
+// 알림 키 하나를 여러 대화에 재사용하는 앱은 같은 키가 이미 다른 대화를 가리킬 수 있다.
+private fun ReplyTargetIdentity.stillDescribes(conversationId: String, sender: String): Boolean =
+    conversationId.isBlank() ||
+        this.conversationId.isBlank() ||
+        this.conversationId == conversationId ||
+        replySenderMatches(sender, senderAliases)

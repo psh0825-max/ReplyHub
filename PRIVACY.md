@@ -13,6 +13,7 @@ ReplyHub can read notifications only after the user explicitly grants Android no
 - Messages are automatically removed after 30 days by default. Users can choose 7, 30, 90 days, or no automatic deletion.
 - Users can disable notification capture separately for each installed supported messenger.
 - Notification logs contain package names, character counts, and action availability, not message or sender content.
+- For auto-send, ReplyHub remembers only which messenger versions hide their screens from accessibility services (package name and version number).
 
 ## OpenAI processing
 
@@ -28,7 +29,11 @@ Installed-app search uses an Android launcher intent query. ReplyHub does not re
 
 ## Sending and automation
 
-ReplyHub sends directly only through a live notification RemoteInput action supplied by the messenger. Exact notification keys are preferred; a fallback target is used only when one active conversation matches. If no unambiguous action is available, ReplyHub marks the copied text as sensitive, opens the app, and asks the user to confirm sending before recording the outgoing message. ReplyHub does not use AccessibilityService to click, scrape, or impersonate another app's interface.
+ReplyHub sends directly through a live notification RemoteInput action supplied by the messenger. Exact notification keys are preferred, but a key is used only while it still describes the same conversation or sender, because some messengers reuse one notification for several chats. Otherwise a fallback target is used only when exactly one active conversation matches.
+
+For messengers whose notifications expose no RemoteInput action (for example WeChat), users can turn on the optional **ReplyHub auto-send** accessibility service. It is off until the user enables it in Android accessibility settings, and it acts only for a few seconds after the user presses send in ReplyHub. During that window it opens the conversation through the original notification, reads the messenger window's interface structure to find the message field and the send button on the same row, types the reply, taps send, and checks that the field was cleared before recording the reply as sent. Users choose which messengers it may act in; feed-style apps such as Instagram, X, LinkedIn, TikTok, Snapchat, and BAND are off by default because their like and mention notifications could put a reply into a public comment field. The service receives events only from the allowed messenger packages, ignores them unless a send is in progress, and does not store, log, or transmit screen content; its diagnostic logs contain only step names and node counts. ReplyHub shows what the service reads and does, and asks for agreement, before opening Android accessibility settings.
+
+If neither path is available or auto-send cannot finish, ReplyHub marks the copied text as sensitive, opens the app, and asks the user to confirm sending before recording the outgoing message.
 
 ## Production recommendations
 

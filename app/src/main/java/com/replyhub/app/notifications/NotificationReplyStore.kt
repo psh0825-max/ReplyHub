@@ -1,8 +1,10 @@
 package com.replyhub.app.notifications
 
+import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
@@ -15,16 +17,33 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 
+enum class ReplySendPath {
+    REMOTE_INPUT,
+    AUTO_SEND,
+    AUTO_SEND_OFF,
+
+    /** 대화는 열 수 있지만 메신저가 화면을 숨겨 자동 입력이 불가능하다. */
+    SCREEN_HIDDEN,
+    MANUAL,
+}
+
+val ReplySendPath.canSendNow: Boolean
+    get() = this == ReplySendPath.REMOTE_INPUT || this == ReplySendPath.AUTO_SEND
+
 object NotificationReplyStore {
     private data class ReplyTarget(
         val notificationKey: String,
         val packageName: String,
         val conversationId: String,
         val senderAliases: Set<String>,
-        val actionIntent: PendingIntent,
+        val actionIntent: PendingIntent?,
         val remoteInputs: Array<RemoteInput>,
+        val contentIntent: PendingIntent?,
         val registeredAt: Long,
-    )
+    ) {
+        val supportsRemoteInput: Boolean
+            get() = actionIntent != null && remoteInputs.isNotEmpty()
+    }
 
     private val targets = ConcurrentHashMap<String, ReplyTarget>()
     private val changeCounter = AtomicLong(0)
@@ -37,10 +56,16 @@ object NotificationReplyStore {
         conversationId: String,
         sender: String,
         senderAliases: Set<String> = emptySet(),
-        action: NotificationCompat.Action,
+        action: NotificationCompat.Action?,
         remoteInputs: Array<RemoteInput>,
+        contentIntent: PendingIntent? = null,
     ) {
         pruneExpiredTargets()
+        val actionIntent = action?.actionIntent
+        if (actionIntent == null && contentIntent == null) {
+            remove(notificationKey)
+            return
+        }
         targets[notificationKey] = ReplyTarget(
             notificationKey = notificationKey,
             packageName = packageName,
@@ -49,8 +74,9 @@ object NotificationReplyStore {
                 sender,
                 *senderAliases.toTypedArray(),
             ),
-            actionIntent = checkNotNull(action.actionIntent),
-            remoteInputs = remoteInputs,
+            actionIntent = actionIntent,
+            remoteInputs = if (actionIntent == null) emptyArray() else remoteInputs,
+            contentIntent = contentIntent,
             registeredAt = System.currentTimeMillis(),
         )
         signalChanged()
@@ -59,6 +85,9 @@ object NotificationReplyStore {
     fun remove(notificationKey: String) {
         if (targets.remove(notificationKey) != null) signalChanged()
     }
+
+    /** 자동 전송 서비스 연결이나 앱별 허용 설정이 바뀌면 화면의 전송 경로 표시를 다시 계산하게 한다. */
+    fun notifyAvailabilityChanged() = signalChanged()
 
     fun clear() {
         if (targets.isNotEmpty()) {
@@ -76,11 +105,35 @@ object NotificationReplyStore {
         packageName: String,
         sender: String,
         conversationId: String,
-    ): Boolean = findTarget(notificationKey, packageName, sender, conversationId) != null
+    ): Boolean = findTarget(notificationKey, packageName, sender, conversationId)
+        ?.supportsRemoteInput == true
+
+    fun sendPath(
+        notificationKey: String,
+        packageName: String,
+        sender: String,
+        conversationId: String,
+    ): ReplySendPath {
+        val target = findTarget(notificationKey, packageName, sender, conversationId)
+            ?: return ReplySendPath.MANUAL
+        return when {
+            target.supportsRemoteInput -> ReplySendPath.REMOTE_INPUT
+            target.contentIntent != null &&
+                ReplyHubAutoSendService.isAvailableFor(target.packageName) ->
+                ReplySendPath.AUTO_SEND
+            target.contentIntent != null &&
+                ReplyHubAutoSendService.isScreenHiddenFor(target.packageName) ->
+                ReplySendPath.SCREEN_HIDDEN
+            target.contentIntent != null -> ReplySendPath.AUTO_SEND_OFF
+            else -> ReplySendPath.MANUAL
+        }
+    }
 
     fun activeTargetPackages(): Set<String> {
         pruneExpiredTargets()
-        return targets.values.mapTo(linkedSetOf()) { it.packageName }
+        return targets.values
+            .filter { it.supportsRemoteInput }
+            .mapTo(linkedSetOf()) { it.packageName }
     }
 
     suspend fun awaitAvailable(
@@ -104,21 +157,58 @@ object NotificationReplyStore {
         text: String,
     ): Result<Unit> = runCatching {
         pruneExpiredTargets()
-        val target = checkNotNull(findTarget(notificationKey, packageName, sender, conversationId)) {
+        val target = findTarget(notificationKey, packageName, sender, conversationId)
+            ?.takeIf { it.supportsRemoteInput }
+        checkNotNull(target) {
             "원본 알림의 빠른 답장 액션을 더 이상 사용할 수 없습니다."
         }
+        val actionIntent = checkNotNull(target.actionIntent)
         val fillInIntent = Intent()
         val results = Bundle().apply {
             target.remoteInputs.forEach { putCharSequence(it.resultKey, text) }
         }
         RemoteInput.addResultsToIntent(target.remoteInputs, fillInIntent, results)
         try {
-            target.actionIntent.send(context, 0, fillInIntent)
+            actionIntent.send(context, 0, fillInIntent)
         } catch (error: PendingIntent.CanceledException) {
             targets.remove(target.notificationKey)
             signalChanged()
             throw error
         }
+    }
+
+    /**
+     * 알림의 contentIntent로 해당 대화 화면을 직접 연다.
+     * 빠른 답장이 없는 앱에서 자동 전송·수동 붙여넣기 전 단계로 사용한다.
+     */
+    fun openConversation(
+        context: Context,
+        notificationKey: String,
+        packageName: String,
+        sender: String,
+        conversationId: String,
+    ): Boolean {
+        pruneExpiredTargets()
+        val target = findTarget(notificationKey, packageName, sender, conversationId)
+        val contentIntent = target?.contentIntent ?: return false
+        return runCatching {
+            // Android 14+에서는 다른 앱 PendingIntent로 액티비티를 띄울 때 명시적 허용이 필요하다.
+            val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ActivityOptions.makeBasic()
+                    .setPendingIntentBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                    )
+                    .toBundle()
+            } else {
+                null
+            }
+            contentIntent.send(context, 0, null, null, null, null, options)
+        }.onFailure {
+            if (it is PendingIntent.CanceledException) {
+                targets.remove(target.notificationKey)
+                signalChanged()
+            }
+        }.isSuccess
     }
 
     private fun findTarget(

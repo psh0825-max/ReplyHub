@@ -2,5 +2,7 @@
 <resources>
     <string name="app_name">ReplyHub</string>
     <string name="notification_listener_label">ReplyHub 알림 수집</string>
+    <string name="auto_send_service_label">ReplyHub 자동 전송</string>
+    <string name="auto_send_service_description">빠른 답장이 없는 메신저(위챗 등)에서 답장을 보낼 때 사용합니다. ReplyHub에서 전송을 누른 직후에만 해당 메신저의 대화를 열어 답장을 입력하고 전송 버튼을 눌러 주며, 화면 내용을 수집하거나 저장하지 않습니다.</string>
 </resources>
 

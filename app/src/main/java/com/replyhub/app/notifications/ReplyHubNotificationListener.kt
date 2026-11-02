@@ -213,6 +213,7 @@ class ReplyHubNotificationListener : NotificationListenerService() {
             .orEmpty()
             .filter { it.packageName in SUPPORTED_PACKAGES }
             .filter { replyHubApplication.privacySettingsStore.isCaptureEnabled(it.packageName) }
+            .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
         active.forEach { sbn ->
                 val extras = sbn.notification.extras
                 val title = extras
@@ -264,24 +265,30 @@ class ReplyHubNotificationListener : NotificationListenerService() {
     ): Boolean {
         val actionScan = scanReplyActions(sbn.notification)
         val replyCandidate = actionScan.selected
+        val contentIntent = sbn.notification.contentIntent
         Log.i(
             TAG,
             "reply actions visible=${actionScan.visibleCount}, " +
                 "invisible=${actionScan.invisibleCount}, wearable=${actionScan.wearableCount}, " +
-                "selected=${replyCandidate?.source?.name?.lowercase() ?: "none"}",
+                "selected=${replyCandidate?.source?.name?.lowercase() ?: "none"}, " +
+                "hasContentIntent=${contentIntent != null}",
         )
-        replyCandidate?.let { candidate ->
-            val action = candidate.action
-            NotificationReplyStore.register(
-                notificationKey = sbn.key,
-                packageName = sbn.packageName,
-                conversationId = conversationId,
-                sender = sender,
-                senderAliases = senderAliases,
-                action = action,
-                remoteInputs = action.remoteInputs.orEmpty().map { it }.toTypedArray(),
-            )
-        } ?: NotificationReplyStore.remove(sbn.key)
+        if (replyCandidate == null && contentIntent == null) {
+            NotificationReplyStore.remove(sbn.key)
+            return false
+        }
+        // RemoteInput이 없어도 contentIntent만으로 등록해 자동 전송(접근성)과
+        // 대화 바로 열기의 타깃으로 사용한다.
+        NotificationReplyStore.register(
+            notificationKey = sbn.key,
+            packageName = sbn.packageName,
+            conversationId = conversationId,
+            sender = sender,
+            senderAliases = senderAliases,
+            action = replyCandidate?.action,
+            remoteInputs = replyCandidate?.action?.remoteInputs.orEmpty().map { it }.toTypedArray(),
+            contentIntent = contentIntent,
+        )
         return replyCandidate != null
     }
 
