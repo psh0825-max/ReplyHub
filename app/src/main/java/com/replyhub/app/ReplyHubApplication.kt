@@ -4,6 +4,7 @@ import android.app.Application
 import com.replyhub.app.ai.ApiKeyStore
 import com.replyhub.app.ai.OpenAiResponsesClient
 import com.replyhub.app.data.AppLanguageStore
+import com.replyhub.app.data.AutoSendCompatibilityStore
 import com.replyhub.app.data.MessageRepository
 import com.replyhub.app.data.MessageRetentionManager
 import com.replyhub.app.data.ContactLinkStore
@@ -22,6 +23,7 @@ class ReplyHubApplication : Application() {
     val demoModeStore by lazy { DemoModeStore(this) }
     val appLanguageStore by lazy { AppLanguageStore(this) }
     val privacySettingsStore by lazy { PrivacySettingsStore(this) }
+    val autoSendCompatibilityStore by lazy { AutoSendCompatibilityStore(this) }
     val messageRetentionManager by lazy {
         MessageRetentionManager(repository, privacySettingsStore)
     }

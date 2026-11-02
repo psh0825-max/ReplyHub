@@ -66,7 +66,10 @@ class ReplyHubViewModel(application: Application) : AndroidViewModel(application
     private val repository = replyHubApplication.repository
     private val assistant = replyHubApplication.replyAssistant
     private val messageProcessor = replyHubApplication.messageProcessor
-    private val dispatcher = ReplyDispatcher(application)
+    private val dispatcher = ReplyDispatcher(
+        application,
+        replyHubApplication.autoSendCompatibilityStore,
+    )
     private var translationRefreshJob: Job? = null
 
     private val _aiSettings = MutableStateFlow(
@@ -80,6 +83,7 @@ class ReplyHubViewModel(application: Application) : AndroidViewModel(application
     val demoMode = replyHubApplication.demoModeStore.enabled
     val appLanguage = replyHubApplication.appLanguageStore.language
     val enabledCapturePackages = replyHubApplication.privacySettingsStore.enabledPackages
+    val autoSendPackages = replyHubApplication.privacySettingsStore.autoSendPackages
     val retentionDays = replyHubApplication.privacySettingsStore.retentionDays
 
     private val _composer = MutableStateFlow(ComposerState())
@@ -367,6 +371,10 @@ class ReplyHubViewModel(application: Application) : AndroidViewModel(application
     fun setCaptureEnabled(packageName: String, enabled: Boolean) {
         replyHubApplication.privacySettingsStore.setCaptureEnabled(packageName, enabled)
         ReplyHubNotificationListener.refreshReplyTargets()
+    }
+
+    fun setAutoSendEnabled(packageName: String, enabled: Boolean) {
+        replyHubApplication.privacySettingsStore.setAutoSendEnabled(packageName, enabled)
     }
 
     fun setRetentionDays(days: Int) {

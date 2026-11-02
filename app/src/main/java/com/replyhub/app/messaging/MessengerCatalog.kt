@@ -6,6 +6,8 @@ data class MessengerDefinition(
     val color: Long,
     val fallbackMark: String,
     val englishDisplayName: String = displayName,
+    /** 피드형 앱은 좋아요·멘션 알림이 많아 답장이 공개 댓글창에 입력될 수 있으므로 기본으로 끈다. */
+    val autoSendByDefault: Boolean = true,
 )
 
 object MessengerCatalog {
@@ -18,7 +20,7 @@ object MessengerCatalog {
         MessengerDefinition("com.whatsapp", "WhatsApp", 0xFF128C5E, "W"),
         MessengerDefinition("com.whatsapp.w4b", "WhatsApp Business", 0xFF075E54, "W"),
         MessengerDefinition("com.facebook.orca", "Messenger", 0xFF0866FF, "M"),
-        MessengerDefinition("com.instagram.android", "Instagram", 0xFFC13584, "I"),
+        MessengerDefinition("com.instagram.android", "Instagram", 0xFFC13584, "I", autoSendByDefault = false),
         MessengerDefinition("com.discord", "Discord", 0xFF5865F2, "D"),
         MessengerDefinition("com.microsoft.teams", "Microsoft Teams", 0xFF6264A7, "T"),
         MessengerDefinition("com.google.android.apps.dynamite", "Google Chat", 0xFF0F9D58, "G"),
@@ -27,17 +29,21 @@ object MessengerCatalog {
         MessengerDefinition("org.thoughtcrime.securesms", "Signal", 0xFF3A76F0, "S"),
         MessengerDefinition("com.viber.voip", "Viber", 0xFF7360F2, "V"),
         MessengerDefinition("com.skype.raider", "Skype", 0xFF0078D4, "S"),
-        MessengerDefinition("com.snapchat.android", "Snapchat", 0xFF8A7B00, "S"),
-        MessengerDefinition("com.twitter.android", "X", 0xFF202124, "X"),
-        MessengerDefinition("com.linkedin.android", "LinkedIn", 0xFF0A66C2, "L"),
-        MessengerDefinition("com.zhiliaoapp.musically", "TikTok", 0xFF202124, "T"),
+        MessengerDefinition("com.snapchat.android", "Snapchat", 0xFF8A7B00, "S", autoSendByDefault = false),
+        MessengerDefinition("com.twitter.android", "X", 0xFF202124, "X", autoSendByDefault = false),
+        MessengerDefinition("com.linkedin.android", "LinkedIn", 0xFF0A66C2, "L", autoSendByDefault = false),
+        MessengerDefinition("com.zhiliaoapp.musically", "TikTok", 0xFF202124, "T", autoSendByDefault = false),
         MessengerDefinition("com.zing.zalo", "Zalo", 0xFF0068FF, "Z"),
-        MessengerDefinition("com.nhn.android.band", "BAND", 0xFF00C73C, "B"),
+        MessengerDefinition("com.nhn.android.band", "BAND", 0xFF00C73C, "B", autoSendByDefault = false),
         MessengerDefinition("com.imo.android.imoim", "imo", 0xFF2A8BF2, "i"),
         MessengerDefinition("com.beeper.android", "Beeper", 0xFF202124, "B"),
     )
 
     val packages: Set<String> = apps.mapTo(linkedSetOf()) { it.packageName }
+
+    val defaultAutoSendPackages: Set<String> = apps
+        .filter { it.autoSendByDefault }
+        .mapTo(linkedSetOf()) { it.packageName }
 
     fun find(packageName: String): MessengerDefinition? =
         apps.firstOrNull { it.packageName == packageName }

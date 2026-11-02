@@ -15,11 +15,27 @@ class PrivacySettingsStore(context: Context) {
         preferences.getInt(KEY_RETENTION_DAYS, DEFAULT_RETENTION_DAYS),
     )
     private val _enabledPackages = MutableStateFlow(enabledPackageSnapshot())
+    private val _autoSendPackages = MutableStateFlow(
+        preferences.getStringSet(KEY_AUTO_SEND_PACKAGES, null)?.toSet()
+            ?: MessengerCatalog.defaultAutoSendPackages,
+    )
 
     val enabledPackages: StateFlow<Set<String>> = _enabledPackages.asStateFlow()
     val retentionDays: StateFlow<Int> = _retentionDays.asStateFlow()
+    val autoSendPackages: StateFlow<Set<String>> = _autoSendPackages.asStateFlow()
 
     fun isCaptureEnabled(packageName: String): Boolean = packageName !in _disabledPackages.value
+
+    fun isAutoSendEnabled(packageName: String): Boolean = packageName in _autoSendPackages.value
+
+    @Synchronized
+    fun setAutoSendEnabled(packageName: String, enabled: Boolean) {
+        val updated = _autoSendPackages.value.toMutableSet().apply {
+            if (enabled) add(packageName) else remove(packageName)
+        }.toSet()
+        preferences.edit().putStringSet(KEY_AUTO_SEND_PACKAGES, updated).apply()
+        _autoSendPackages.value = updated
+    }
 
     @Synchronized
     fun setCaptureEnabled(packageName: String, enabled: Boolean) {
@@ -59,6 +75,7 @@ class PrivacySettingsStore(context: Context) {
         private const val KEY_DISABLED_PACKAGES = "disabled_packages"
         private const val KEY_RETENTION_DAYS = "retention_days"
         private const val KEY_LAST_RETENTION_PRUNE = "last_retention_prune"
+        private const val KEY_AUTO_SEND_PACKAGES = "auto_send_packages"
     }
 }
 

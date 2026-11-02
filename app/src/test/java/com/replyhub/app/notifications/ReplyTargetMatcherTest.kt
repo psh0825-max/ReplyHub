@@ -94,6 +94,56 @@ class ReplyTargetMatcherTest {
     }
 
     @Test
+    fun `exact key is refused once the notification moved to another conversation`() {
+        val targets = listOf(target("shared-key", "title:bob", "Bob"))
+
+        assertNull(
+            selectReplyTargetKey(
+                targets = targets,
+                notificationKey = "shared-key",
+                packageName = "com.example.messenger",
+                conversationId = "title:alice",
+                sender = "Alice",
+            ),
+        )
+    }
+
+    @Test
+    fun `refused shared key falls back to the matching conversation`() {
+        val targets = listOf(
+            target("shared-key", "title:bob", "Bob"),
+            target("alice-key", "title:alice", "Alice"),
+        )
+
+        assertEquals(
+            "alice-key",
+            selectReplyTargetKey(
+                targets = targets,
+                notificationKey = "shared-key",
+                packageName = "com.example.messenger",
+                conversationId = "title:alice",
+                sender = "Alice",
+            ),
+        )
+    }
+
+    @Test
+    fun `exact key survives conversation id drift when the sender still matches`() {
+        val targets = listOf(target("room-key", "shortcut:alice", "Alice"))
+
+        assertEquals(
+            "room-key",
+            selectReplyTargetKey(
+                targets = targets,
+                notificationKey = "room-key",
+                packageName = "com.example.messenger",
+                conversationId = "title:alice",
+                sender = "Alice",
+            ),
+        )
+    }
+
+    @Test
     fun `refuses ambiguous sender alias fallback`() {
         val targets = listOf(
             target("room-a-key", "room-a", "Alex"),
