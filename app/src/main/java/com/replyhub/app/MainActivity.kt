@@ -17,6 +17,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,14 +31,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -170,13 +177,26 @@ private fun uiText(korean: String, english: String): String =
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // targetSdk 35+는 Android 15+에서 edge-to-edge가 강제되므로 모든 버전에서 같은 방식으로 그린다.
+        // 상태 바·내비게이션 바 인셋은 TopAppBar, Scaffold, 하단 바가 각각 비운다.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
             ReplyHubTheme(darkTheme = isSystemInDarkTheme()) {
                 val viewModel: ReplyHubViewModel = viewModel()
                 val appLanguage by viewModel.appLanguage.collectAsStateWithLifecycle()
                 CompositionLocalProvider(LocalAppLanguage provides appLanguage) {
-                    ReplyHubApp(viewModel)
+                    // 가로 화면의 카메라 컷아웃은 시스템 바 인셋에 포함되지 않아 여기서 비운다.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background)
+                            .windowInsetsPadding(
+                                WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal),
+                            ),
+                    ) {
+                        ReplyHubApp(viewModel)
+                    }
                 }
             }
         }
@@ -1428,10 +1448,12 @@ private fun ConversationDetailScreen(
             )
         },
         bottomBar = {
+            // Scaffold는 bottomBar에 인셋을 주지 않는다. 배경은 내비게이션 바 뒤까지 깔고 내용만 위로 올린다.
             Surface(tonalElevation = 3.dp) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),

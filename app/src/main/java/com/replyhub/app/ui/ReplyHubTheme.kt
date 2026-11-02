@@ -1,15 +1,10 @@
 package com.replyhub.app.ui
 
-import android.app.Activity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFF146B4A),
@@ -59,24 +54,14 @@ private val DarkColors = darkColorScheme(
     scrim = Color.Black,
 )
 
+// 시스템 바 색과 아이콘 밝기는 MainActivity의 enableEdgeToEdge()가 정한다.
+// Android 15부터는 Window의 상태 바·내비게이션 바 색 지정이 무시된다.
 @Composable
 fun ReplyHubTheme(
     darkTheme: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) DarkColors else LightColors
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.background.toArgb()
-            window.navigationBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !darkTheme
-                isAppearanceLightNavigationBars = !darkTheme
-            }
-        }
-    }
 
     MaterialTheme(
         colorScheme = colorScheme,
