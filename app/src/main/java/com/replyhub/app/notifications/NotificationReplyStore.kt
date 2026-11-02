@@ -193,14 +193,23 @@ object NotificationReplyStore {
         val contentIntent = target?.contentIntent ?: return false
         return runCatching {
             // Android 14+에서는 다른 앱 PendingIntent로 액티비티를 띄울 때 명시적 허용이 필요하다.
-            val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ActivityOptions.makeBasic()
-                    .setPendingIntentBackgroundActivityStartMode(
-                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
-                    )
-                    .toBundle()
-            } else {
-                null
+            // 답장 창에서 전송을 누른 직후, 즉 ReplyHub가 화면에 보일 때만 호출되므로
+            // Android 16+에서는 보이는 동안에만 허용하는 모드를 쓴다.
+            val options = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA ->
+                    ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_IF_VISIBLE,
+                        )
+                        .toBundle()
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                    ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(
+                            @Suppress("DEPRECATION")
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                        )
+                        .toBundle()
+                else -> null
             }
             contentIntent.send(context, 0, null, null, null, null, options)
         }.onFailure {

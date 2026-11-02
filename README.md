@@ -29,7 +29,7 @@ ReplyHub is an Android notification triage hub for major consumer and workplace 
 
 ## Run
 
-1. Open this folder in Android Studio.
+1. Open this folder in Android Studio Narwhal 3 Feature Drop (2025.1.3) or newer. The build uses AGP 8.13, Kotlin 2.2, and JDK 17+, and targets Android 16 (API 36).
 2. Select an Android 8.0+ device.
 3. Run the `app` configuration.
 4. In ReplyHub, open notification access settings and enable ReplyHub.
